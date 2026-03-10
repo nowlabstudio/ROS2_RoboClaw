@@ -11,9 +11,12 @@
 #include <rclcpp/macros.hpp>
 #include <rclcpp_lifecycle/state.hpp>
 
+#include <atomic>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace roboclaw_hardware
@@ -69,6 +72,25 @@ struct BufferStatus
   State   state = IDLE;
   int     commands_in_buffer = 0;
   bool    executing = false;
+};
+
+/// Shadow buffer for diagnostics written by background thread,
+/// read by the RT loop under a mutex.
+struct DiagShadow
+{
+  double main_battery_v  = 0.0;
+  double temperature_c   = 0.0;
+  double error_status    = 0.0;
+  double current_left_a  = 0.0;
+  double current_right_a = 0.0;
+};
+
+/// Per-wheel encoder health tracking for stuck/runaway detection.
+struct EncoderHealthState
+{
+  uint32_t stuck_counter[2]   = {0, 0};
+  uint32_t runaway_counter[2] = {0, 0};
+  uint32_t comm_fail_counter  = 0;
 };
 
 // ===========================================================================
@@ -183,6 +205,8 @@ private:
   void initialize_state_interfaces();
   hardware_interface::return_type execute_velocity_command(
     double left_rad_s, double right_rad_s);
+  void diag_thread_func();
+  void check_encoder_health();
 
   // ---- Connection ---------------------------------------------------------
   std::string    tcp_host_ = "192.168.68.60";
@@ -230,20 +254,32 @@ private:
   bool   cmd_vel_dirty_ = false;
 
   // ---- Diagnostics GPIO state interfaces ----------------------------------
-  double gpio_main_battery_v_  = 0.0;
-  double gpio_temperature_c_   = 0.0;
-  double gpio_error_status_    = 0.0;
-  double gpio_current_left_a_  = 0.0;
-  double gpio_current_right_a_ = 0.0;
+  double gpio_main_battery_v_   = 0.0;
+  double gpio_temperature_c_    = 0.0;
+  double gpio_error_status_     = 0.0;
+  double gpio_current_left_a_   = 0.0;
+  double gpio_current_right_a_  = 0.0;
+  double gpio_encoder_health_   = 0.0;   // 0=OK, 1=stuck, 2=runaway, 3=comm_fail
 
   // ---- Velocity estimation from encoder deltas ----------------------------
   std::array<double, 2> prev_state_pos_ = {0.0, 0.0};
   bool   first_read_ = true;
 
-  // ---- Diagnostics scheduling ---------------------------------------------
-  int    diag_cycle_counter_ = 0;
-  static constexpr int kDiagIntervalCycles = 25;  // 4 slots × 25 cycles = 100 cycles = 1Hz full refresh
-  int    diag_slot_ = 0;                          // rotates 0..3 across slots
+  // ---- Diagnostics background thread -------------------------------------
+  std::thread         diag_thread_;
+  std::mutex          diag_mutex_;
+  DiagShadow          diag_shadow_;
+  std::atomic<bool>   diag_running_{false};
+
+  // ---- Protocol mutex (serialises RT loop and diag thread TCP access) ----
+  std::mutex          protocol_mutex_;
+
+  // ---- Encoder health monitoring -----------------------------------------
+  EncoderHealthState  enc_health_;
+  uint32_t enc_stuck_limit_     = 50;    // cycles before e-stop (500ms @ 100Hz)
+  uint32_t enc_runaway_limit_   = 5;     // consecutive impossible-speed reads
+  uint32_t enc_comm_fail_limit_ = 10;    // consecutive TCP failures
+  double   enc_max_speed_rad_s_ = 30.0;  // physical maximum wheel speed
 };
 
 }  // namespace roboclaw_hardware

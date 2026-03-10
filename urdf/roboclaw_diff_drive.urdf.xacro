@@ -26,8 +26,13 @@
   <xacro:arg name="default_acceleration"  default="2000"/>
   <xacro:arg name="buffer_depth"          default="4"/>
 
-  <xacro:arg name="auto_home_on_startup"  default="false"/>
-  <xacro:arg name="position_limits_enabled" default="false"/>
+  <xacro:arg name="auto_home_on_startup"      default="false"/>
+  <xacro:arg name="position_limits_enabled"   default="false"/>
+
+  <xacro:arg name="encoder_stuck_limit"       default="50"/>
+  <xacro:arg name="encoder_runaway_limit"     default="5"/>
+  <xacro:arg name="encoder_comm_fail_limit"   default="10"/>
+  <xacro:arg name="encoder_max_speed_rad_s"   default="30.0"/>
 
   <!-- ================================================================== -->
   <!-- Derived properties                                                 -->
@@ -166,6 +171,11 @@
 
       <param name="auto_home_on_startup">$(arg auto_home_on_startup)</param>
       <param name="position_limits_enabled">$(arg position_limits_enabled)</param>
+
+      <param name="encoder_stuck_limit">$(arg encoder_stuck_limit)</param>
+      <param name="encoder_runaway_limit">$(arg encoder_runaway_limit)</param>
+      <param name="encoder_comm_fail_limit">$(arg encoder_comm_fail_limit)</param>
+      <param name="encoder_max_speed_rad_s">$(arg encoder_max_speed_rad_s)</param>
     </hardware>
 
     <joint name="left_wheel_joint">
@@ -192,6 +202,7 @@
       <state_interface name="error_status"/>
       <state_interface name="current_left_a"/>
       <state_interface name="current_right_a"/>
+      <state_interface name="encoder_health"/>
     </gpio>
   </ros2_control>
 

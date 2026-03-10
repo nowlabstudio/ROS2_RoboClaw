@@ -5,6 +5,7 @@
 #include <rclcpp/rclcpp.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <string>
 
@@ -74,6 +75,15 @@ void RoboClawHardware::extract_motion_parameters(
     get_param(info, "buffer_depth", std::to_string(buffer_depth_)));
   default_accel_ = static_cast<uint32_t>(std::stoul(
     get_param(info, "default_acceleration", std::to_string(default_accel_))));
+
+  enc_stuck_limit_ = static_cast<uint32_t>(std::stoul(
+    get_param(info, "encoder_stuck_limit", std::to_string(enc_stuck_limit_))));
+  enc_runaway_limit_ = static_cast<uint32_t>(std::stoul(
+    get_param(info, "encoder_runaway_limit", std::to_string(enc_runaway_limit_))));
+  enc_comm_fail_limit_ = static_cast<uint32_t>(std::stoul(
+    get_param(info, "encoder_comm_fail_limit", std::to_string(enc_comm_fail_limit_))));
+  enc_max_speed_rad_s_ = std::stod(
+    get_param(info, "encoder_max_speed_rad_s", std::to_string(enc_max_speed_rad_s_)));
 }
 
 void RoboClawHardware::extract_servo_parameters(
@@ -220,10 +230,12 @@ hardware_interface::CallbackReturn RoboClawHardware::on_activate(
   // protects against complete communication loss, not missing cmd_vel.
   protocol_->SetTimeout(address_, 500);
 
-  // Don't force the first write — let the control loop send a command
-  // only when the diff_drive_controller actually requests non-zero velocity.
   cmd_vel_dirty_ = false;
   prev_cmd_vel_ = {0.0, 0.0};
+  enc_health_ = {};
+
+  diag_running_ = true;
+  diag_thread_ = std::thread(&RoboClawHardware::diag_thread_func, this);
 
   RCLCPP_INFO(logger, "Activated -- motors stopped, control loop running");
   return hardware_interface::CallbackReturn::SUCCESS;
@@ -233,6 +245,11 @@ hardware_interface::CallbackReturn RoboClawHardware::on_deactivate(
   const rclcpp_lifecycle::State & /*previous_state*/)
 {
   auto logger = rclcpp::get_logger("RoboClawHardware");
+
+  diag_running_ = false;
+  if (diag_thread_.joinable()) {
+    diag_thread_.join();
+  }
 
   if (protocol_) {
     protocol_->DutyM1M2(address_, 0, 0);
@@ -262,11 +279,12 @@ RoboClawHardware::export_state_interfaces()
       &hw_state_vel_[i]);
   }
 
-  interfaces.emplace_back("diagnostics", "main_battery_v",  &gpio_main_battery_v_);
-  interfaces.emplace_back("diagnostics", "temperature_c",   &gpio_temperature_c_);
-  interfaces.emplace_back("diagnostics", "error_status",    &gpio_error_status_);
-  interfaces.emplace_back("diagnostics", "current_left_a",  &gpio_current_left_a_);
-  interfaces.emplace_back("diagnostics", "current_right_a", &gpio_current_right_a_);
+  interfaces.emplace_back("diagnostics", "main_battery_v",   &gpio_main_battery_v_);
+  interfaces.emplace_back("diagnostics", "temperature_c",    &gpio_temperature_c_);
+  interfaces.emplace_back("diagnostics", "error_status",     &gpio_error_status_);
+  interfaces.emplace_back("diagnostics", "current_left_a",   &gpio_current_left_a_);
+  interfaces.emplace_back("diagnostics", "current_right_a",  &gpio_current_right_a_);
+  interfaces.emplace_back("diagnostics", "encoder_health",   &gpio_encoder_health_);
 
   return interfaces;
 }
@@ -297,62 +315,48 @@ hardware_interface::return_type RoboClawHardware::read(
     return hardware_interface::return_type::OK;
   }
 
-  // --- Encoder positions (single TCP round-trip) ---
-  auto enc = protocol_->GetEncoders(address_);
-  if (enc.ok) {
-    hw_state_pos_[0] = unit_converter_->counts_to_radians(enc.enc1);
-    hw_state_pos_[1] = unit_converter_->counts_to_radians(enc.enc2);
-
-    // Velocity from position delta — avoids a second TCP call (GetSpeeds).
-    double dt = period.seconds();
-    if (!first_read_ && dt > 0.0) {
-      hw_state_vel_[0] = (hw_state_pos_[0] - prev_state_pos_[0]) / dt;
-      hw_state_vel_[1] = (hw_state_pos_[1] - prev_state_pos_[1]) / dt;
-    }
-    prev_state_pos_[0] = hw_state_pos_[0];
-    prev_state_pos_[1] = hw_state_pos_[1];
-    first_read_ = false;
+  // --- Encoder positions (single TCP round-trip, mutex-protected) ---
+  RoboClawProtocol::EncodersResult enc;
+  {
+    std::lock_guard<std::mutex> lock(protocol_mutex_);
+    enc = protocol_->GetEncoders(address_);
   }
 
-  // --- Rotating diagnostics: ONE extra TCP call per interval, cycling
-  //     through 4 slots (volts, temps, error, currents). This spreads the
-  //     bus load evenly instead of bursting 4 calls in a single cycle.
-  if (++diag_cycle_counter_ >= kDiagIntervalCycles) {
-    diag_cycle_counter_ = 0;
-
-    switch (diag_slot_) {
-      case 0: {
-        auto volts = protocol_->GetVolts(address_);
-        if (volts.ok) {
-          gpio_main_battery_v_ = static_cast<double>(volts.main_bat) / 10.0;
-        }
-        break;
-      }
-      case 1: {
-        auto temps = protocol_->GetTemps(address_);
-        if (temps.ok) {
-          gpio_temperature_c_ = static_cast<double>(temps.temp1) / 10.0;
-        }
-        break;
-      }
-      case 2: {
-        auto err = protocol_->ReadError(address_);
-        if (err.ok) {
-          gpio_error_status_ = static_cast<double>(err.error);
-        }
-        break;
-      }
-      case 3: {
-        auto cur = protocol_->ReadCurrents(address_);
-        if (cur.ok) {
-          gpio_current_left_a_  = static_cast<double>(cur.current1) / 100.0;
-          gpio_current_right_a_ = static_cast<double>(cur.current2) / 100.0;
-        }
-        break;
-      }
+  if (!enc.ok) {
+    if (++enc_health_.comm_fail_counter >= enc_comm_fail_limit_) {
+      RCLCPP_ERROR(rclcpp::get_logger("RoboClawHardware"),
+        "Encoder comm failure (%u consecutive) -- emergency stop",
+        enc_health_.comm_fail_counter);
+      gpio_encoder_health_ = 3.0;
+      emergency_stop();
     }
+    return hardware_interface::return_type::OK;
+  }
+  enc_health_.comm_fail_counter = 0;
 
-    diag_slot_ = (diag_slot_ + 1) % 4;
+  hw_state_pos_[0] = unit_converter_->counts_to_radians(enc.enc1);
+  hw_state_pos_[1] = unit_converter_->counts_to_radians(enc.enc2);
+
+  double dt = period.seconds();
+  if (!first_read_ && dt > 0.0) {
+    hw_state_vel_[0] = (hw_state_pos_[0] - prev_state_pos_[0]) / dt;
+    hw_state_vel_[1] = (hw_state_pos_[1] - prev_state_pos_[1]) / dt;
+  }
+
+  check_encoder_health();
+
+  prev_state_pos_[0] = hw_state_pos_[0];
+  prev_state_pos_[1] = hw_state_pos_[1];
+  first_read_ = false;
+
+  // --- Copy diagnostics from background thread (ns-cost mutex) ---
+  {
+    std::lock_guard<std::mutex> lock(diag_mutex_);
+    gpio_main_battery_v_  = diag_shadow_.main_battery_v;
+    gpio_temperature_c_   = diag_shadow_.temperature_c;
+    gpio_error_status_    = diag_shadow_.error_status;
+    gpio_current_left_a_  = diag_shadow_.current_left_a;
+    gpio_current_right_a_ = diag_shadow_.current_right_a;
   }
 
   return hardware_interface::return_type::OK;
@@ -373,7 +377,11 @@ hardware_interface::return_type RoboClawHardware::write(
     return hardware_interface::return_type::OK;
   }
 
-  auto ret = execute_velocity_command(hw_cmd_vel_[0], hw_cmd_vel_[1]);
+  hardware_interface::return_type ret;
+  {
+    std::lock_guard<std::mutex> lock(protocol_mutex_);
+    ret = execute_velocity_command(hw_cmd_vel_[0], hw_cmd_vel_[1]);
+  }
   prev_cmd_vel_[0] = hw_cmd_vel_[0];
   prev_cmd_vel_[1] = hw_cmd_vel_[1];
   cmd_vel_dirty_ = false;
@@ -444,6 +452,93 @@ hardware_interface::return_type RoboClawHardware::execute_velocity_command(
     RCLCPP_ERROR(rclcpp::get_logger("RoboClawHardware"),
       "execute_velocity_command exception: %s", e.what());
     return hardware_interface::return_type::ERROR;
+  }
+}
+
+// ===========================================================================
+// Diagnostics background thread
+// ===========================================================================
+
+void RoboClawHardware::diag_thread_func()
+{
+  using namespace std::chrono_literals;
+
+  while (diag_running_.load()) {
+    DiagShadow snap;
+
+    {
+      std::lock_guard<std::mutex> lock(protocol_mutex_);
+
+      auto volts = protocol_->GetVolts(address_);
+      if (volts.ok) {
+        snap.main_battery_v = static_cast<double>(volts.main_bat) / 10.0;
+      }
+
+      auto temps = protocol_->GetTemps(address_);
+      if (temps.ok) {
+        snap.temperature_c = static_cast<double>(temps.temp1) / 10.0;
+      }
+
+      auto err = protocol_->ReadError(address_);
+      if (err.ok) {
+        snap.error_status = static_cast<double>(err.error);
+      }
+
+      auto cur = protocol_->ReadCurrents(address_);
+      if (cur.ok) {
+        snap.current_left_a  = static_cast<double>(cur.current1) / 100.0;
+        snap.current_right_a = static_cast<double>(cur.current2) / 100.0;
+      }
+    }
+
+    {
+      std::lock_guard<std::mutex> lock(diag_mutex_);
+      diag_shadow_ = snap;
+    }
+
+    std::this_thread::sleep_for(250ms);
+  }
+}
+
+// ===========================================================================
+// Encoder health monitoring
+// ===========================================================================
+
+void RoboClawHardware::check_encoder_health()
+{
+  if (first_read_) {
+    return;
+  }
+
+  for (int i = 0; i < 2; ++i) {
+    bool commanding = std::abs(hw_cmd_vel_[i]) > 1e-4;
+    bool moved = std::abs(hw_state_pos_[i] - prev_state_pos_[i]) > 1e-6;
+
+    if (commanding && !moved) {
+      if (++enc_health_.stuck_counter[i] >= enc_stuck_limit_) {
+        RCLCPP_ERROR(rclcpp::get_logger("RoboClawHardware"),
+          "Encoder %d stuck (%u cycles with command but no motion) -- emergency stop",
+          i, enc_health_.stuck_counter[i]);
+        gpio_encoder_health_ = 1.0;
+        emergency_stop();
+        return;
+      }
+    } else {
+      enc_health_.stuck_counter[i] = 0;
+    }
+
+    if (std::abs(hw_state_vel_[i]) > enc_max_speed_rad_s_) {
+      if (++enc_health_.runaway_counter[i] >= enc_runaway_limit_) {
+        RCLCPP_ERROR(rclcpp::get_logger("RoboClawHardware"),
+          "Encoder %d runaway (vel=%.1f rad/s > max=%.1f) -- emergency stop",
+          i, hw_state_vel_[i], enc_max_speed_rad_s_);
+        gpio_encoder_health_ = 2.0;
+        emergency_stop();
+        return;
+      }
+    } else {
+      enc_health_.runaway_counter[i] = 0;
+    }
   }
 }
 

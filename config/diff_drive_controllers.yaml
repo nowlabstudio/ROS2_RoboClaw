@@ -42,6 +42,7 @@ diagnostics_broadcaster:
       - error_status
       - current_left_a
       - current_right_a
+      - encoder_health
 
 diff_drive_controller:
   ros__parameters:
