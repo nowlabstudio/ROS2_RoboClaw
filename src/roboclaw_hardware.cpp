@@ -373,11 +373,6 @@ hardware_interface::return_type RoboClawHardware::write(
     return hardware_interface::return_type::OK;
   }
 
-  RCLCPP_INFO(rclcpp::get_logger("RoboClawHardware"),
-    "write cmd: L=%.4f R=%.4f (prev L=%.4f R=%.4f dirty=%d)",
-    hw_cmd_vel_[0], hw_cmd_vel_[1],
-    prev_cmd_vel_[0], prev_cmd_vel_[1], cmd_vel_dirty_);
-
   auto ret = execute_velocity_command(hw_cmd_vel_[0], hw_cmd_vel_[1]);
   prev_cmd_vel_[0] = hw_cmd_vel_[0];
   prev_cmd_vel_[1] = hw_cmd_vel_[1];
@@ -393,6 +388,20 @@ hardware_interface::return_type RoboClawHardware::execute_velocity_command(
   double left_rad_s, double right_rad_s)
 {
   try {
+    constexpr double kStopThreshold = 1e-6;
+    bool is_stop = std::abs(left_rad_s) < kStopThreshold &&
+                   std::abs(right_rad_s) < kStopThreshold;
+
+    // For zero velocity, always use DutyM1M2(0,0) — a direct PWM stop.
+    // Speed/SpeedAccel modes rely on the RoboClaw's internal PID which
+    // reads encoder feedback; noisy or unmounted encoders cause the
+    // PID to fight endlessly, preventing the motor from actually stopping.
+    if (is_stop) {
+      bool ok = protocol_->DutyM1M2(address_, 0, 0);
+      return ok ? hardware_interface::return_type::OK
+                : hardware_interface::return_type::ERROR;
+    }
+
     bool ok = false;
 
     switch (motion_strategy_) {
