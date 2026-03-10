@@ -107,9 +107,9 @@ def generate_launch_description():
         output="screen",
         parameters=[{
             "mixing_mode": "tank",
-            "left_topic": "/robot/rc_ch2",
-            "right_topic": "/robot/rc_ch1",
-            "mode_switch_topic": "/robot/rc_ch5",
+            "left_topic": "/robot/motor_left",
+            "right_topic": "/robot/motor_right",
+            "mode_switch_topic": "/robot/rc_mode",
             "mode_switch_threshold": 0.5,
             "cmd_vel_topic": "/diff_drive_controller/cmd_vel",
             "estop_topic": "/robot/estop",

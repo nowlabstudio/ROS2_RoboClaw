@@ -215,6 +215,7 @@ private:
   MotionStrategy motion_strategy_ = MotionStrategy::SPEED_ACCEL;
   int            buffer_depth_    = 4;
   uint32_t       default_accel_   = 1000;
+  double         duty_max_rad_s_  = 22.5;
 
   // ---- Servo parameters ---------------------------------------------------
   bool   auto_home_on_startup_     = false;

@@ -22,14 +22,15 @@
   <xacro:arg name="encoder_counts_per_rev" default="1000"/>
   <xacro:arg name="gear_ratio"            default="16.0"/>
 
-  <xacro:arg name="motion_strategy"       default="speed_accel"/>
+  <xacro:arg name="motion_strategy"       default="duty"/>
   <xacro:arg name="default_acceleration"  default="2000"/>
+  <xacro:arg name="duty_max_rad_s"       default="22.5"/>
   <xacro:arg name="buffer_depth"          default="4"/>
 
   <xacro:arg name="auto_home_on_startup"      default="false"/>
   <xacro:arg name="position_limits_enabled"   default="false"/>
 
-  <xacro:arg name="encoder_stuck_limit"       default="50"/>
+  <xacro:arg name="encoder_stuck_limit"       default="0"/>
   <xacro:arg name="encoder_runaway_limit"     default="5"/>
   <xacro:arg name="encoder_comm_fail_limit"   default="10"/>
   <xacro:arg name="encoder_max_speed_rad_s"   default="30.0"/>
@@ -167,6 +168,7 @@
 
       <param name="motion_strategy">$(arg motion_strategy)</param>
       <param name="default_acceleration">$(arg default_acceleration)</param>
+      <param name="duty_max_rad_s">$(arg duty_max_rad_s)</param>
       <param name="buffer_depth">$(arg buffer_depth)</param>
 
       <param name="auto_home_on_startup">$(arg auto_home_on_startup)</param>

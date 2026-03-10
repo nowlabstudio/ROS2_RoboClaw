@@ -74,6 +74,8 @@ void RoboClawHardware::extract_motion_parameters(
     get_param(info, "buffer_depth", std::to_string(buffer_depth_)));
   default_accel_ = static_cast<uint32_t>(std::stoul(
     get_param(info, "default_acceleration", std::to_string(default_accel_))));
+  duty_max_rad_s_ = std::stod(
+    get_param(info, "duty_max_rad_s", std::to_string(duty_max_rad_s_)));
 
   enc_stuck_limit_ = static_cast<uint32_t>(std::stoul(
     get_param(info, "encoder_stuck_limit", std::to_string(enc_stuck_limit_))));
@@ -167,6 +169,10 @@ hardware_interface::CallbackReturn RoboClawHardware::on_init(
       "Initialized: tcp=%s:%d addr=0x%02X | %s",
       tcp_host_.c_str(), tcp_port_, address_,
       unit_converter_->to_string().c_str());
+    RCLCPP_INFO(logger,
+      "Motion: strategy=%d accel=%u duty_max_rad_s=%.1f buffer=%d",
+      static_cast<int>(motion_strategy_), default_accel_,
+      duty_max_rad_s_, buffer_depth_);
 
   } catch (const std::exception & e) {
     RCLCPP_ERROR(logger, "on_init failed: %s", e.what());
@@ -398,14 +404,14 @@ hardware_interface::return_type RoboClawHardware::execute_velocity_command(
 
     switch (motion_strategy_) {
       case MotionStrategy::DUTY: {
-        int16_t d1 = unit_converter_->rad_per_sec_to_duty(left_rad_s);
-        int16_t d2 = unit_converter_->rad_per_sec_to_duty(right_rad_s);
+        int16_t d1 = unit_converter_->rad_per_sec_to_duty(left_rad_s, duty_max_rad_s_);
+        int16_t d2 = unit_converter_->rad_per_sec_to_duty(right_rad_s, duty_max_rad_s_);
         ok = protocol_->DutyM1M2(address_, d1, d2);
         break;
       }
       case MotionStrategy::DUTY_ACCEL: {
-        int16_t d1 = unit_converter_->rad_per_sec_to_duty(left_rad_s);
-        int16_t d2 = unit_converter_->rad_per_sec_to_duty(right_rad_s);
+        int16_t d1 = unit_converter_->rad_per_sec_to_duty(left_rad_s, duty_max_rad_s_);
+        int16_t d2 = unit_converter_->rad_per_sec_to_duty(right_rad_s, duty_max_rad_s_);
         ok = protocol_->DutyAccelM1M2(address_,
           d1, default_accel_, d2, default_accel_);
         break;
@@ -495,7 +501,8 @@ void RoboClawHardware::check_encoder_health()
     bool moved = std::abs(hw_state_pos_[i] - prev_state_pos_[i]) > 1e-6;
 
     if (commanding && !moved) {
-      if (++enc_health_.stuck_counter[i] >= enc_stuck_limit_) {
+      if (enc_stuck_limit_ > 0 &&
+          ++enc_health_.stuck_counter[i] >= enc_stuck_limit_) {
         RCLCPP_ERROR(rclcpp::get_logger("RoboClawHardware"),
           "Encoder %d stuck (%u cycles with command but no motion) -- emergency stop",
           i, enc_health_.stuck_counter[i]);
@@ -507,7 +514,8 @@ void RoboClawHardware::check_encoder_health()
       enc_health_.stuck_counter[i] = 0;
     }
 
-    if (std::abs(hw_state_vel_[i]) > enc_max_speed_rad_s_) {
+    if (enc_runaway_limit_ > 0 &&
+        std::abs(hw_state_vel_[i]) > enc_max_speed_rad_s_) {
       if (++enc_health_.runaway_counter[i] >= enc_runaway_limit_) {
         RCLCPP_ERROR(rclcpp::get_logger("RoboClawHardware"),
           "Encoder %d runaway (vel=%.1f rad/s > max=%.1f) -- emergency stop",
