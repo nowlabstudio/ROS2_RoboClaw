@@ -314,6 +314,15 @@ hardware_interface::return_type RoboClawHardware::read(
     return hardware_interface::return_type::OK;
   }
 
+  // Fast dead-socket detection via keepalive/poll before burning 50ms on recv
+  if (!connection_lost_ && transport_ && !transport_->is_alive()) {
+    RCLCPP_WARN(rclcpp::get_logger("RoboClawHardware"),
+      "TCP socket dead (keepalive/poll) -- entering reconnect mode");
+    gpio_encoder_health_ = 3.0;
+    connection_lost_ = true;
+    reconnect_cooldown_ = 0;
+  }
+
   if (connection_lost_) {
     if (reconnect_cooldown_ > 0) {
       --reconnect_cooldown_;

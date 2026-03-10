@@ -4,6 +4,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <netinet/tcp.h>
+#include <poll.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
@@ -31,12 +32,22 @@ bool RoboClawTcp::connect(
     return false;
   }
 
-  // Disable Nagle -- every write() must produce an immediate TCP segment so
-  // the USR-K6 can start UART transmission without waiting for more data.
   int flag = 1;
   ::setsockopt(fd_, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(flag));
 
-  set_socket_timeout(timeout_sec_);
+  // TCP keepalive: detect dead peer within ~3s (1s idle + 3×1s probes).
+  ::setsockopt(fd_, SOL_SOCKET, SO_KEEPALIVE, &flag, sizeof(flag));
+  int idle = 1;
+  ::setsockopt(fd_, IPPROTO_TCP, TCP_KEEPIDLE, &idle, sizeof(idle));
+  int interval = 1;
+  ::setsockopt(fd_, IPPROTO_TCP, TCP_KEEPINTVL, &interval, sizeof(interval));
+  int count = 3;
+  ::setsockopt(fd_, IPPROTO_TCP, TCP_KEEPCNT, &count, sizeof(count));
+
+  // TCP_USER_TIMEOUT: kernel gives up on unacked data after 3s.
+  int user_timeout_ms = 3000;
+  ::setsockopt(fd_, IPPROTO_TCP, TCP_USER_TIMEOUT,
+    &user_timeout_ms, sizeof(user_timeout_ms));
 
   struct sockaddr_in addr{};
   addr.sin_family = AF_INET;
@@ -47,21 +58,37 @@ bool RoboClawTcp::connect(
     return false;
   }
 
-  // Use a generous 2-second timeout for the initial TCP handshake.
-  // The per-byte timeout is applied separately after connection.
-  struct timeval connect_tv{};
-  connect_tv.tv_sec = 2;
-  connect_tv.tv_usec = 0;
-  ::setsockopt(fd_, SOL_SOCKET, SO_SNDTIMEO, &connect_tv, sizeof(connect_tv));
+  // Non-blocking connect with poll() — max 500ms, doesn't stall the RT loop.
+  int orig_flags = ::fcntl(fd_, F_GETFL, 0);
+  ::fcntl(fd_, F_SETFL, orig_flags | O_NONBLOCK);
 
-  if (::connect(fd_, reinterpret_cast<struct sockaddr *>(&addr),
-                sizeof(addr)) < 0)
-  {
+  int rc = ::connect(fd_, reinterpret_cast<struct sockaddr *>(&addr),
+                     sizeof(addr));
+  if (rc < 0 && errno != EINPROGRESS) {
     close();
     return false;
   }
 
-  // Restore the normal per-byte timeout for send operations.
+  if (rc != 0) {
+    struct pollfd pfd{};
+    pfd.fd = fd_;
+    pfd.events = POLLOUT;
+    int pr = ::poll(&pfd, 1, 500);
+    if (pr <= 0) {
+      close();
+      return false;
+    }
+    int err = 0;
+    socklen_t elen = sizeof(err);
+    ::getsockopt(fd_, SOL_SOCKET, SO_ERROR, &err, &elen);
+    if (err != 0) {
+      close();
+      return false;
+    }
+  }
+
+  // Restore blocking mode with normal per-byte timeout.
+  ::fcntl(fd_, F_SETFL, orig_flags);
   set_socket_timeout(timeout_sec_);
 
   return true;
@@ -80,6 +107,29 @@ bool RoboClawTcp::reconnect()
 {
   close();
   return connect(host_, port_, timeout_sec_);
+}
+
+bool RoboClawTcp::is_alive() const noexcept
+{
+  if (fd_ < 0) {
+    return false;
+  }
+  struct pollfd pfd{};
+  pfd.fd = fd_;
+  pfd.events = POLLOUT;
+  int rc = ::poll(&pfd, 1, 0);
+  if (rc <= 0) {
+    return false;
+  }
+  // POLLERR / POLLHUP → peer is gone
+  if (pfd.revents & (POLLERR | POLLHUP | POLLNVAL)) {
+    return false;
+  }
+  // Double-check with getsockopt SO_ERROR
+  int err = 0;
+  socklen_t elen = sizeof(err);
+  ::getsockopt(fd_, SOL_SOCKET, SO_ERROR, &err, &elen);
+  return err == 0;
 }
 
 bool RoboClawTcp::write(const uint8_t * data, size_t len)

@@ -38,6 +38,9 @@ public:
   /// Close and re-open the connection with the last-used parameters.
   bool reconnect();
 
+  /// Quick socket health probe (non-blocking poll for errors/hangup).
+  bool is_alive() const noexcept;
+
   /// Send exactly @p len bytes.  Uses a loop to guarantee full delivery.
   /// @returns true if all bytes were sent.
   bool write(const uint8_t * data, size_t len);
