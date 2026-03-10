@@ -69,7 +69,11 @@ diff_drive_controller:
     pose_covariance_diagonal:  [0.001, 0.001, 0.001, 0.001, 0.001, 0.01]
     twist_covariance_diagonal: [0.001, 0.001, 0.001, 0.001, 0.001, 0.01]
 
-    open_loop: false
+    # Set true while encoders are not mounted on motor shafts.
+    # Floating encoders generate noise that the closed-loop controller
+    # interprets as motion, causing unwanted motor commands.
+    # Switch back to false once encoders are properly mounted.
+    open_loop: true
     enable_odom_tf: true
 
     # Safety: stop motors if no cmd_vel arrives within 500 ms.
