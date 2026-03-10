@@ -316,7 +316,7 @@ hardware_interface::return_type RoboClawHardware::read(
   }
 
   // --- Encoder positions (single TCP round-trip, mutex-protected) ---
-  RoboClawProtocol::EncodersResult enc;
+  EncodersResult enc;
   {
     std::lock_guard<std::mutex> lock(protocol_mutex_);
     enc = protocol_->GetEncoders(address_);
