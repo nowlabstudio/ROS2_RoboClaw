@@ -17,6 +17,9 @@ controller_manager:
     joint_state_broadcaster:
       type: joint_state_broadcaster/JointStateBroadcaster
 
+    diagnostics_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+
     diff_drive_controller:
       type: diff_drive_controller/DiffDriveController
 
@@ -28,6 +31,17 @@ joint_state_broadcaster:
     interfaces:
       - position
       - velocity
+
+diagnostics_broadcaster:
+  ros__parameters:
+    joints:
+      - diagnostics
+    interfaces:
+      - main_battery_v
+      - temperature_c
+      - error_status
+      - current_left_a
+      - current_right_a
 
 diff_drive_controller:
   ros__parameters:

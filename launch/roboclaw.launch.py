@@ -79,6 +79,15 @@ def generate_launch_description():
         output="screen",
     )
 
+    diagnostics_broadcaster_spawner = Node(
+        package="controller_manager",
+        executable="spawner",
+        arguments=["diagnostics_broadcaster",
+                    "--controller-manager-timeout", "30"],
+        namespace=LaunchConfiguration("namespace"),
+        output="screen",
+    )
+
     diff_drive_spawner = Node(
         package="controller_manager",
         executable="spawner",
@@ -88,10 +97,17 @@ def generate_launch_description():
         output="screen",
     )
 
-    # Chain: wait for joint_state_broadcaster before starting diff_drive
-    delayed_diff_drive = RegisterEventHandler(
+    # Chain: joint_state_broadcaster -> diagnostics_broadcaster -> diff_drive
+    delayed_diagnostics = RegisterEventHandler(
         event_handler=OnProcessExit(
             target_action=joint_state_broadcaster_spawner,
+            on_exit=[diagnostics_broadcaster_spawner],
+        )
+    )
+
+    delayed_diff_drive = RegisterEventHandler(
+        event_handler=OnProcessExit(
+            target_action=diagnostics_broadcaster_spawner,
             on_exit=[diff_drive_spawner],
         )
     )
@@ -101,6 +117,7 @@ def generate_launch_description():
             robot_state_publisher,
             controller_manager,
             joint_state_broadcaster_spawner,
+            delayed_diagnostics,
             delayed_diff_drive,
         ]
     )
