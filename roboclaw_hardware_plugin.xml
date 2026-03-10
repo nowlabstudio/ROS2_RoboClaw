@@ -1,0 +1,11 @@
+<library path="roboclaw_hardware">
+  <class
+    name="roboclaw_hardware/RoboClawHardware"
+    type="roboclaw_hardware::RoboClawHardware"
+    base_class_type="hardware_interface::SystemInterface">
+    <description>
+      ros2_control hardware interface for Basicmicro RoboClaw motor controllers
+      communicating over TCP via an Ethernet-to-Serial converter.
+    </description>
+  </class>
+</library>
