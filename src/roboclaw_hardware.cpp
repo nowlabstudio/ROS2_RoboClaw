@@ -452,8 +452,9 @@ hardware_interface::return_type RoboClawHardware::execute_velocity_command(
     }
 
     if (!ok) {
+      static rclcpp::Clock steady_clock(RCL_STEADY_TIME);
       RCLCPP_WARN_THROTTLE(rclcpp::get_logger("RoboClawHardware"),
-        *rclcpp::Clock::make_shared(), 2000,
+        steady_clock, 2000,
         "Motor command failed -- check connection");
     }
 
