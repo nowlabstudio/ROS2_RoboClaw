@@ -1,5 +1,6 @@
 #include "roboclaw_hardware/roboclaw_protocol.hpp"
 
+#include <algorithm>
 #include <cstring>
 
 namespace roboclaw_hardware
@@ -520,11 +521,15 @@ bool RoboClawProtocol::SpeedAccelDeccelPosM1M2(
 
 bool RoboClawProtocol::SetTimeout(uint8_t address, uint32_t timeout_ms)
 {
+  // RoboClaw expects a single byte in 10ms units (0-255 → 0-2550ms).
+  uint8_t val = static_cast<uint8_t>(
+    std::min(timeout_ms / 10u, static_cast<uint32_t>(255)));
+
   for (int attempt = 0; attempt < kMaxRetries; ++attempt) {
     transport_.flush();
 
     if (!send_command(address, cmd::SET_TIMEOUT)) { continue; }
-    if (!send_long(timeout_ms))                    { continue; }
+    if (!send_byte(val))                           { continue; }
     if (write_checksum_and_ack()) { return true; }
   }
   return false;
