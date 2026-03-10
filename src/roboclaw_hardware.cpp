@@ -74,6 +74,10 @@ void RoboClawHardware::extract_motion_parameters(
     get_param(info, "buffer_depth", std::to_string(buffer_depth_)));
   default_accel_ = static_cast<uint32_t>(std::stoul(
     get_param(info, "default_acceleration", std::to_string(default_accel_))));
+  duty_accel_rate_ = static_cast<uint32_t>(std::stoul(
+    get_param(info, "duty_accel_rate", std::to_string(duty_accel_rate_))));
+  duty_decel_rate_ = static_cast<uint32_t>(std::stoul(
+    get_param(info, "duty_decel_rate", std::to_string(duty_decel_rate_))));
   duty_max_rad_s_ = std::stod(
     get_param(info, "duty_max_rad_s", std::to_string(duty_max_rad_s_)));
 
@@ -170,8 +174,10 @@ hardware_interface::CallbackReturn RoboClawHardware::on_init(
       tcp_host_.c_str(), tcp_port_, address_,
       unit_converter_->to_string().c_str());
     RCLCPP_INFO(logger,
-      "Motion: strategy=%d accel=%u duty_max_rad_s=%.1f buffer=%d",
+      "Motion: strategy=%d accel=%u duty_accel=%u duty_decel=%u "
+      "duty_max_rad_s=%.1f buffer=%d",
       static_cast<int>(motion_strategy_), default_accel_,
+      duty_accel_rate_, duty_decel_rate_,
       duty_max_rad_s_, buffer_depth_);
 
   } catch (const std::exception & e) {
@@ -416,9 +422,16 @@ hardware_interface::return_type RoboClawHardware::execute_velocity_command(
     // reads encoder feedback; noisy or unmounted encoders cause the
     // PID to fight endlessly, preventing the motor from actually stopping.
     if (is_stop) {
-      bool ok = protocol_->DutyM1M2(address_, 0, 0);
-      return ok ? hardware_interface::return_type::OK
-                : hardware_interface::return_type::ERROR;
+      if (motion_strategy_ == MotionStrategy::DUTY_ACCEL &&
+          (prev_duty_m1_ != 0 || prev_duty_m2_ != 0)) {
+        protocol_->DutyAccelM1M2(address_,
+          0, duty_decel_rate_, 0, duty_decel_rate_);
+      } else {
+        protocol_->DutyM1M2(address_, 0, 0);
+      }
+      prev_duty_m1_ = 0;
+      prev_duty_m2_ = 0;
+      return hardware_interface::return_type::OK;
     }
 
     bool ok = false;
@@ -433,8 +446,13 @@ hardware_interface::return_type RoboClawHardware::execute_velocity_command(
       case MotionStrategy::DUTY_ACCEL: {
         int16_t d1 = unit_converter_->rad_per_sec_to_duty(left_rad_s, duty_max_rad_s_);
         int16_t d2 = unit_converter_->rad_per_sec_to_duty(right_rad_s, duty_max_rad_s_);
-        ok = protocol_->DutyAccelM1M2(address_,
-          d1, default_accel_, d2, default_accel_);
+        uint32_t a1 = (std::abs(d1) >= std::abs(prev_duty_m1_))
+                      ? duty_accel_rate_ : duty_decel_rate_;
+        uint32_t a2 = (std::abs(d2) >= std::abs(prev_duty_m2_))
+                      ? duty_accel_rate_ : duty_decel_rate_;
+        ok = protocol_->DutyAccelM1M2(address_, d1, a1, d2, a2);
+        prev_duty_m1_ = d1;
+        prev_duty_m2_ = d2;
         break;
       }
       case MotionStrategy::SPEED: {

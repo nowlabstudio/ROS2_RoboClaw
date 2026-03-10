@@ -22,8 +22,15 @@
   <xacro:arg name="encoder_counts_per_rev" default="1000"/>
   <xacro:arg name="gear_ratio"            default="16.0"/>
 
-  <xacro:arg name="motion_strategy"       default="duty"/>
-  <xacro:arg name="default_acceleration"  default="2000"/>
+  <!-- Motion strategy: duty, duty_accel, speed, speed_accel -->
+  <xacro:arg name="motion_strategy"       default="duty_accel"/>
+  <!-- Acceleration/deceleration for duty_accel mode (RoboClaw hardware ramp).
+       Higher = faster ramp. Unit: duty change per second (0-32767 scale).
+       15000 ≈ snappy RC feel, 5000 ≈ gentle, 32767 = instant.
+       Decel can be higher for quick stops. -->
+  <xacro:arg name="duty_accel_rate"       default="50000"/>
+  <xacro:arg name="duty_decel_rate"       default="50000"/>
+  <xacro:arg name="default_acceleration"  default="15000"/>
   <xacro:arg name="duty_max_rad_s"       default="22.5"/>
   <xacro:arg name="buffer_depth"          default="4"/>
 
@@ -168,6 +175,8 @@
 
       <param name="motion_strategy">$(arg motion_strategy)</param>
       <param name="default_acceleration">$(arg default_acceleration)</param>
+      <param name="duty_accel_rate">$(arg duty_accel_rate)</param>
+      <param name="duty_decel_rate">$(arg duty_decel_rate)</param>
       <param name="duty_max_rad_s">$(arg duty_max_rad_s)</param>
       <param name="buffer_depth">$(arg buffer_depth)</param>
 
