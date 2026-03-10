@@ -5,7 +5,9 @@ Starts:
   1. robot_state_publisher  (URDF -> /robot_description + TF)
   2. controller_manager     (loads the hardware plugin)
   3. joint_state_broadcaster
-  4. diff_drive_controller
+  4. diagnostics_broadcaster
+  5. diff_drive_controller
+  6. rc_teleop_node          (RC tank→cmd_vel with CH5 mode switch)
 
 All parameters can be overridden from the command line:
   ros2 launch roboclaw_hardware roboclaw.launch.py tcp_host:=10.0.0.5
@@ -97,6 +99,27 @@ def generate_launch_description():
         output="screen",
     )
 
+    # -- RC Teleop (tank mixing + CH5 mode switch) --
+    rc_teleop_node = Node(
+        package="roboclaw_tcp_adapter",
+        executable="rc_teleop_node",
+        name="rc_teleop",
+        output="screen",
+        parameters=[{
+            "mixing_mode": "tank",
+            "left_topic": "/robot/rc_ch2",
+            "right_topic": "/robot/rc_ch1",
+            "mode_switch_topic": "/robot/rc_ch5",
+            "mode_switch_threshold": 0.5,
+            "cmd_vel_topic": "/diff_drive_controller/cmd_vel",
+            "estop_topic": "/robot/estop",
+            "max_linear_speed": 4.5,
+            "max_angular_speed": 3.0,
+            "deadzone": 0.05,
+            "publish_rate": 20.0,
+        }],
+    )
+
     # Chain: joint_state_broadcaster -> diagnostics_broadcaster -> diff_drive
     delayed_diagnostics = RegisterEventHandler(
         event_handler=OnProcessExit(
@@ -119,5 +142,6 @@ def generate_launch_description():
             joint_state_broadcaster_spawner,
             delayed_diagnostics,
             delayed_diff_drive,
+            rc_teleop_node,
         ]
     )
