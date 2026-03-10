@@ -11,12 +11,9 @@
 #include <rclcpp/macros.hpp>
 #include <rclcpp_lifecycle/state.hpp>
 
-#include <atomic>
 #include <map>
 #include <memory>
-#include <mutex>
 #include <string>
-#include <thread>
 #include <vector>
 
 namespace roboclaw_hardware
@@ -72,17 +69,6 @@ struct BufferStatus
   State   state = IDLE;
   int     commands_in_buffer = 0;
   bool    executing = false;
-};
-
-/// Shadow buffer for diagnostics written by background thread,
-/// read by the RT loop under a mutex.
-struct DiagShadow
-{
-  double main_battery_v  = 0.0;
-  double temperature_c   = 0.0;
-  double error_status    = 0.0;
-  double current_left_a  = 0.0;
-  double current_right_a = 0.0;
 };
 
 /// Per-wheel encoder health tracking for stuck/runaway detection.
@@ -205,7 +191,7 @@ private:
   void initialize_state_interfaces();
   hardware_interface::return_type execute_velocity_command(
     double left_rad_s, double right_rad_s);
-  void diag_thread_func();
+  void read_one_diagnostic();
   void check_encoder_health();
 
   // ---- Connection ---------------------------------------------------------
@@ -265,14 +251,13 @@ private:
   std::array<double, 2> prev_state_pos_ = {0.0, 0.0};
   bool   first_read_ = true;
 
-  // ---- Diagnostics background thread -------------------------------------
-  std::thread         diag_thread_;
-  std::mutex          diag_mutex_;
-  DiagShadow          diag_shadow_;
-  std::atomic<bool>   diag_running_{false};
-
-  // ---- Protocol mutex (serialises RT loop and diag thread TCP access) ----
-  std::mutex          protocol_mutex_;
+  // ---- Rotating diagnostics (one TCP read every N-th cycle, 4 slots) ----
+  // Slot 0: volts, 1: temps, 2: error, 3: currents
+  // At 100Hz with interval=1: diag every cycle, full refresh 40ms = 25Hz
+  uint8_t  diag_slot_ = 0;
+  uint16_t diag_cycle_counter_ = 0;
+  static constexpr uint8_t  kDiagSlotCount = 4;
+  static constexpr uint16_t kDiagIntervalCycles = 1;
 
   // ---- Encoder health monitoring -----------------------------------------
   EncoderHealthState  enc_health_;

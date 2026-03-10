@@ -5,7 +5,6 @@
 #include <rclcpp/rclcpp.hpp>
 
 #include <algorithm>
-#include <chrono>
 #include <cmath>
 #include <string>
 
@@ -233,9 +232,8 @@ hardware_interface::CallbackReturn RoboClawHardware::on_activate(
   cmd_vel_dirty_ = false;
   prev_cmd_vel_ = {0.0, 0.0};
   enc_health_ = {};
-
-  diag_running_ = true;
-  diag_thread_ = std::thread(&RoboClawHardware::diag_thread_func, this);
+  diag_slot_ = 0;
+  diag_cycle_counter_ = 0;
 
   RCLCPP_INFO(logger, "Activated -- motors stopped, control loop running");
   return hardware_interface::CallbackReturn::SUCCESS;
@@ -245,11 +243,6 @@ hardware_interface::CallbackReturn RoboClawHardware::on_deactivate(
   const rclcpp_lifecycle::State & /*previous_state*/)
 {
   auto logger = rclcpp::get_logger("RoboClawHardware");
-
-  diag_running_ = false;
-  if (diag_thread_.joinable()) {
-    diag_thread_.join();
-  }
 
   if (protocol_) {
     protocol_->DutyM1M2(address_, 0, 0);
@@ -315,12 +308,8 @@ hardware_interface::return_type RoboClawHardware::read(
     return hardware_interface::return_type::OK;
   }
 
-  // --- Encoder positions (single TCP round-trip, mutex-protected) ---
-  EncodersResult enc;
-  {
-    std::lock_guard<std::mutex> lock(protocol_mutex_);
-    enc = protocol_->GetEncoders(address_);
-  }
+  // --- Encoder positions (1 TCP round-trip, ~5-10ms) ---
+  auto enc = protocol_->GetEncoders(address_);
 
   if (!enc.ok) {
     if (++enc_health_.comm_fail_counter >= enc_comm_fail_limit_) {
@@ -349,14 +338,13 @@ hardware_interface::return_type RoboClawHardware::read(
   prev_state_pos_[1] = hw_state_pos_[1];
   first_read_ = false;
 
-  // --- Copy diagnostics from background thread (ns-cost mutex) ---
-  {
-    std::lock_guard<std::mutex> lock(diag_mutex_);
-    gpio_main_battery_v_  = diag_shadow_.main_battery_v;
-    gpio_temperature_c_   = diag_shadow_.temperature_c;
-    gpio_error_status_    = diag_shadow_.error_status;
-    gpio_current_left_a_  = diag_shadow_.current_left_a;
-    gpio_current_right_a_ = diag_shadow_.current_right_a;
+  // --- Rotating diagnostics: 1 TCP read every N-th cycle (1 of 4 slots) --
+  // Most cycles: GetEncoders only (~8ms, fits 20ms budget easily).
+  // Every 3rd cycle: GetEncoders + 1 diag (~15ms, still fits 20ms).
+  // Full refresh of all 4 diagnostics: every 12 cycles = 240ms ≈ 4Hz.
+  if (++diag_cycle_counter_ >= kDiagIntervalCycles) {
+    diag_cycle_counter_ = 0;
+    read_one_diagnostic();
   }
 
   return hardware_interface::return_type::OK;
@@ -377,11 +365,7 @@ hardware_interface::return_type RoboClawHardware::write(
     return hardware_interface::return_type::OK;
   }
 
-  hardware_interface::return_type ret;
-  {
-    std::lock_guard<std::mutex> lock(protocol_mutex_);
-    ret = execute_velocity_command(hw_cmd_vel_[0], hw_cmd_vel_[1]);
-  }
+  auto ret = execute_velocity_command(hw_cmd_vel_[0], hw_cmd_vel_[1]);
   prev_cmd_vel_[0] = hw_cmd_vel_[0];
   prev_cmd_vel_[1] = hw_cmd_vel_[1];
   cmd_vel_dirty_ = false;
@@ -456,48 +440,44 @@ hardware_interface::return_type RoboClawHardware::execute_velocity_command(
 }
 
 // ===========================================================================
-// Diagnostics background thread
+// Rotating diagnostics (single-threaded, 1 TCP read per cycle)
 // ===========================================================================
 
-void RoboClawHardware::diag_thread_func()
+void RoboClawHardware::read_one_diagnostic()
 {
-  using namespace std::chrono_literals;
-
-  while (diag_running_.load()) {
-    DiagShadow snap;
-
-    {
-      std::lock_guard<std::mutex> lock(protocol_mutex_);
-
+  switch (diag_slot_) {
+    case 0: {
       auto volts = protocol_->GetVolts(address_);
       if (volts.ok) {
-        snap.main_battery_v = static_cast<double>(volts.main_bat) / 10.0;
+        gpio_main_battery_v_ = static_cast<double>(volts.main_bat) / 10.0;
       }
-
+      break;
+    }
+    case 1: {
       auto temps = protocol_->GetTemps(address_);
       if (temps.ok) {
-        snap.temperature_c = static_cast<double>(temps.temp1) / 10.0;
+        gpio_temperature_c_ = static_cast<double>(temps.temp1) / 10.0;
       }
-
+      break;
+    }
+    case 2: {
       auto err = protocol_->ReadError(address_);
       if (err.ok) {
-        snap.error_status = static_cast<double>(err.error);
+        gpio_error_status_ = static_cast<double>(err.error);
       }
-
+      break;
+    }
+    case 3: {
       auto cur = protocol_->ReadCurrents(address_);
       if (cur.ok) {
-        snap.current_left_a  = static_cast<double>(cur.current1) / 100.0;
-        snap.current_right_a = static_cast<double>(cur.current2) / 100.0;
+        gpio_current_left_a_  = static_cast<double>(cur.current1) / 100.0;
+        gpio_current_right_a_ = static_cast<double>(cur.current2) / 100.0;
       }
+      break;
     }
-
-    {
-      std::lock_guard<std::mutex> lock(diag_mutex_);
-      diag_shadow_ = snap;
-    }
-
-    std::this_thread::sleep_for(250ms);
   }
+
+  diag_slot_ = (diag_slot_ + 1) % kDiagSlotCount;
 }
 
 // ===========================================================================
