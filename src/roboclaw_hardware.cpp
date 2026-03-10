@@ -252,6 +252,12 @@ RoboClawHardware::export_state_interfaces()
       &hw_state_vel_[i]);
   }
 
+  interfaces.emplace_back("diagnostics", "main_battery_v",  &gpio_main_battery_v_);
+  interfaces.emplace_back("diagnostics", "temperature_c",   &gpio_temperature_c_);
+  interfaces.emplace_back("diagnostics", "error_status",    &gpio_error_status_);
+  interfaces.emplace_back("diagnostics", "current_left_a",  &gpio_current_left_a_);
+  interfaces.emplace_back("diagnostics", "current_right_a", &gpio_current_right_a_);
+
   return interfaces;
 }
 
@@ -336,14 +342,6 @@ hardware_interface::return_type RoboClawHardware::read(
       }
     }
 
-    if (diag_slot_ == 3) {
-      RCLCPP_INFO_THROTTLE(rclcpp::get_logger("RoboClawHardware"),
-        *rclcpp::Clock::make_shared(), 2000,
-        "DIAG | %.1fV | %.1f°C | M1=%.2fA M2=%.2fA | err=0x%X",
-        gpio_main_battery_v_, gpio_temperature_c_,
-        gpio_current_left_a_, gpio_current_right_a_,
-        static_cast<uint32_t>(gpio_error_status_));
-    }
     diag_slot_ = (diag_slot_ + 1) % 4;
   }
 

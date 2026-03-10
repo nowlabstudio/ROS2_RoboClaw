@@ -185,6 +185,14 @@
       <state_interface name="position"/>
       <state_interface name="velocity"/>
     </joint>
+
+    <gpio name="diagnostics">
+      <state_interface name="main_battery_v"/>
+      <state_interface name="temperature_c"/>
+      <state_interface name="error_status"/>
+      <state_interface name="current_left_a"/>
+      <state_interface name="current_right_a"/>
+    </gpio>
   </ros2_control>
 
 </robot>
