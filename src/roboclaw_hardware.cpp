@@ -314,16 +314,28 @@ hardware_interface::return_type RoboClawHardware::read(
     return hardware_interface::return_type::OK;
   }
 
+  if (connection_lost_) {
+    if (reconnect_cooldown_ > 0) {
+      --reconnect_cooldown_;
+      return hardware_interface::return_type::OK;
+    }
+    if (!attempt_reconnect()) {
+      reconnect_cooldown_ = kReconnectIntervalCycles;
+      return hardware_interface::return_type::OK;
+    }
+  }
+
   // --- Encoder positions (1 TCP round-trip, ~5-10ms) ---
   auto enc = protocol_->GetEncoders(address_);
 
   if (!enc.ok) {
     if (++enc_health_.comm_fail_counter >= enc_comm_fail_limit_) {
-      RCLCPP_ERROR(rclcpp::get_logger("RoboClawHardware"),
-        "Encoder comm failure (%u consecutive) -- emergency stop",
+      RCLCPP_WARN(rclcpp::get_logger("RoboClawHardware"),
+        "TCP comm failure (%u consecutive) -- entering reconnect mode",
         enc_health_.comm_fail_counter);
       gpio_encoder_health_ = 3.0;
-      emergency_stop();
+      connection_lost_ = true;
+      reconnect_cooldown_ = 0;
     }
     return hardware_interface::return_type::OK;
   }
@@ -359,7 +371,7 @@ hardware_interface::return_type RoboClawHardware::read(
 hardware_interface::return_type RoboClawHardware::write(
   const rclcpp::Time & /*time*/, const rclcpp::Duration & /*period*/)
 {
-  if (!protocol_ || emergency_stop_active_) {
+  if (!protocol_ || emergency_stop_active_ || connection_lost_) {
     return hardware_interface::return_type::OK;
   }
 
@@ -559,6 +571,39 @@ bool RoboClawHardware::clear_motion_buffers()
 // ===========================================================================
 // Connection helpers
 // ===========================================================================
+
+bool RoboClawHardware::attempt_reconnect()
+{
+  auto logger = rclcpp::get_logger("RoboClawHardware");
+  ++reconnect_attempts_;
+
+  RCLCPP_INFO(logger, "Reconnect attempt #%u ...", reconnect_attempts_);
+
+  if (!transport_->reconnect()) {
+    RCLCPP_WARN(logger, "TCP reconnect failed (attempt #%u), retry in ~1s",
+      reconnect_attempts_);
+    return false;
+  }
+
+  auto ver = protocol_->ReadVersion(address_);
+  if (!ver.ok) {
+    RCLCPP_WARN(logger, "TCP connected but ReadVersion failed (attempt #%u)",
+      reconnect_attempts_);
+    transport_->close();
+    return false;
+  }
+
+  RCLCPP_INFO(logger, "Reconnected after %u attempts: %s",
+    reconnect_attempts_, ver.version.c_str());
+
+  connection_lost_ = false;
+  reconnect_attempts_ = 0;
+  enc_health_.comm_fail_counter = 0;
+  gpio_encoder_health_ = 0.0;
+  first_read_ = true;
+  cmd_vel_dirty_ = true;
+  return true;
+}
 
 bool RoboClawHardware::establish_connection()
 {

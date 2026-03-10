@@ -230,6 +230,13 @@ private:
   bool servo_capable_             = false;
   bool emergency_stop_active_     = false;
 
+  // ---- TCP reconnection ---------------------------------------------------
+  bool   connection_lost_         = false;
+  uint32_t reconnect_attempts_   = 0;
+  static constexpr uint32_t kReconnectIntervalCycles = 100;  // try every ~1s @100Hz
+  uint32_t reconnect_cooldown_   = 0;
+  bool attempt_reconnect();
+
   // ---- ros2_control state & command arrays --------------------------------
   // Indices: 0 = left, 1 = right
   std::array<double, 2> hw_cmd_vel_  = {0.0, 0.0};
