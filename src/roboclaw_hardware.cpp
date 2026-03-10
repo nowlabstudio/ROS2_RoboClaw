@@ -210,12 +210,22 @@ hardware_interface::CallbackReturn RoboClawHardware::on_activate(
   emergency_stop_active_ = false;
   initialize_state_interfaces();
 
-  // Set the RoboClaw's own serial timeout (500 ms).  If the controller
-  // receives no command within this window it will stop the motors --
-  // an additional safety layer beyond diff_drive_controller's cmd_vel_timeout.
+  // Ensure motors are stopped before the control loop begins.
+  // This prevents transient motion from stale RoboClaw state or
+  // controller initialization artifacts.
+  protocol_->DutyM1M2(address_, 0, 0);
+
+  // Set the RoboClaw's own serial timeout (500 ms).  Note: this timeout
+  // is reset by ANY command including reads (GetEncoders), so it only
+  // protects against complete communication loss, not missing cmd_vel.
   protocol_->SetTimeout(address_, 500);
 
-  RCLCPP_INFO(logger, "Activated -- control loop running");
+  // Don't force the first write — let the control loop send a command
+  // only when the diff_drive_controller actually requests non-zero velocity.
+  cmd_vel_dirty_ = false;
+  prev_cmd_vel_ = {0.0, 0.0};
+
+  RCLCPP_INFO(logger, "Activated -- motors stopped, control loop running");
   return hardware_interface::CallbackReturn::SUCCESS;
 }
 
@@ -362,6 +372,11 @@ hardware_interface::return_type RoboClawHardware::write(
   if (!changed && !cmd_vel_dirty_) {
     return hardware_interface::return_type::OK;
   }
+
+  RCLCPP_INFO(rclcpp::get_logger("RoboClawHardware"),
+    "write cmd: L=%.4f R=%.4f (prev L=%.4f R=%.4f dirty=%d)",
+    hw_cmd_vel_[0], hw_cmd_vel_[1],
+    prev_cmd_vel_[0], prev_cmd_vel_[1], cmd_vel_dirty_);
 
   auto ret = execute_velocity_command(hw_cmd_vel_[0], hw_cmd_vel_[1]);
   prev_cmd_vel_[0] = hw_cmd_vel_[0];

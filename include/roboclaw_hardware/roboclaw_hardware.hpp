@@ -227,7 +227,7 @@ private:
 
   // ---- Write-on-change: skip TCP write when command hasn't changed --------
   std::array<double, 2> prev_cmd_vel_ = {0.0, 0.0};
-  bool   cmd_vel_dirty_ = true;  // force first write
+  bool   cmd_vel_dirty_ = false;
 
   // ---- Diagnostics GPIO state interfaces ----------------------------------
   double gpio_main_battery_v_  = 0.0;
