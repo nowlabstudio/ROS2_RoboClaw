@@ -1,3 +1,4 @@
+#include "roboclaw_hardware/roboclaw_hardware.hpp"
 #include "roboclaw_hardware/roboclaw_protocol.hpp"
 
 #include <gtest/gtest.h>

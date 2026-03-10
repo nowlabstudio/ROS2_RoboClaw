@@ -468,13 +468,14 @@ void RoboClawHardware::initialize_state_interfaces()
     return;
   }
 
-  EncodersResult enc = protocol_->GetEncoders(address_);
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdangling-pointer"
+  auto enc = protocol_->GetEncoders(address_);
   if (enc.ok) {
-    int32_t e1 = enc.enc1;
-    int32_t e2 = enc.enc2;
-    hw_state_pos_[0] = unit_converter_->counts_to_radians(e1);
-    hw_state_pos_[1] = unit_converter_->counts_to_radians(e2);
+    hw_state_pos_[0] = unit_converter_->counts_to_radians(enc.enc1);
+    hw_state_pos_[1] = unit_converter_->counts_to_radians(enc.enc2);
   }
+#pragma GCC diagnostic pop
 
   hw_state_vel_[0] = 0.0;
   hw_state_vel_[1] = 0.0;
