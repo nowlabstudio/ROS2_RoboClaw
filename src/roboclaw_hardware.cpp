@@ -335,6 +335,15 @@ hardware_interface::return_type RoboClawHardware::read(
         break;
       }
     }
+
+    if (diag_slot_ == 3) {
+      RCLCPP_INFO_THROTTLE(rclcpp::get_logger("RoboClawHardware"),
+        *rclcpp::Clock::make_shared(), 2000,
+        "DIAG | %.1fV | %.1f°C | M1=%.2fA M2=%.2fA | err=0x%X",
+        gpio_main_battery_v_, gpio_temperature_c_,
+        gpio_current_left_a_, gpio_current_right_a_,
+        static_cast<uint32_t>(gpio_error_status_));
+    }
     diag_slot_ = (diag_slot_ + 1) % 4;
   }
 
