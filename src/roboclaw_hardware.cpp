@@ -275,50 +275,67 @@ RoboClawHardware::export_command_interfaces()
 // ===========================================================================
 
 hardware_interface::return_type RoboClawHardware::read(
-  const rclcpp::Time & /*time*/, const rclcpp::Duration & /*period*/)
+  const rclcpp::Time & /*time*/, const rclcpp::Duration & period)
 {
   if (!protocol_ || emergency_stop_active_) {
     return hardware_interface::return_type::OK;
   }
 
-  // --- Encoder positions ---
+  // --- Encoder positions (single TCP round-trip) ---
   auto enc = protocol_->GetEncoders(address_);
   if (enc.ok) {
     hw_state_pos_[0] = unit_converter_->counts_to_radians(enc.enc1);
     hw_state_pos_[1] = unit_converter_->counts_to_radians(enc.enc2);
+
+    // Velocity from position delta — avoids a second TCP call (GetSpeeds).
+    double dt = period.seconds();
+    if (!first_read_ && dt > 0.0) {
+      hw_state_vel_[0] = (hw_state_pos_[0] - prev_state_pos_[0]) / dt;
+      hw_state_vel_[1] = (hw_state_pos_[1] - prev_state_pos_[1]) / dt;
+    }
+    prev_state_pos_[0] = hw_state_pos_[0];
+    prev_state_pos_[1] = hw_state_pos_[1];
+    first_read_ = false;
   }
 
-  // --- Motor speeds ---
-  auto spd = protocol_->GetSpeeds(address_);
-  if (spd.ok) {
-    hw_state_vel_[0] = unit_converter_->counts_per_sec_to_rad_per_sec(spd.speed1);
-    hw_state_vel_[1] = unit_converter_->counts_per_sec_to_rad_per_sec(spd.speed2);
-  }
+  // --- Rotating diagnostics: ONE extra TCP call per interval, cycling
+  //     through 4 slots (volts, temps, error, currents). This spreads the
+  //     bus load evenly instead of bursting 4 calls in a single cycle.
+  if (++diag_cycle_counter_ >= kDiagIntervalCycles) {
+    diag_cycle_counter_ = 0;
 
-  // --- Periodic diagnostics (every N cycles, not every cycle) ---
-  if (++diag_read_counter_ >= diag_read_interval_) {
-    diag_read_counter_ = 0;
-
-    auto volts = protocol_->GetVolts(address_);
-    if (volts.ok) {
-      gpio_main_battery_v_ = static_cast<double>(volts.main_bat) / 10.0;
+    switch (diag_slot_) {
+      case 0: {
+        auto volts = protocol_->GetVolts(address_);
+        if (volts.ok) {
+          gpio_main_battery_v_ = static_cast<double>(volts.main_bat) / 10.0;
+        }
+        break;
+      }
+      case 1: {
+        auto temps = protocol_->GetTemps(address_);
+        if (temps.ok) {
+          gpio_temperature_c_ = static_cast<double>(temps.temp1) / 10.0;
+        }
+        break;
+      }
+      case 2: {
+        auto err = protocol_->ReadError(address_);
+        if (err.ok) {
+          gpio_error_status_ = static_cast<double>(err.error);
+        }
+        break;
+      }
+      case 3: {
+        auto cur = protocol_->ReadCurrents(address_);
+        if (cur.ok) {
+          gpio_current_left_a_  = static_cast<double>(cur.current1) / 100.0;
+          gpio_current_right_a_ = static_cast<double>(cur.current2) / 100.0;
+        }
+        break;
+      }
     }
-
-    auto temps = protocol_->GetTemps(address_);
-    if (temps.ok) {
-      gpio_temperature_c_ = static_cast<double>(temps.temp1) / 10.0;
-    }
-
-    auto err = protocol_->ReadError(address_);
-    if (err.ok) {
-      gpio_error_status_ = static_cast<double>(err.error);
-    }
-
-    auto cur = protocol_->ReadCurrents(address_);
-    if (cur.ok) {
-      gpio_current_left_a_  = static_cast<double>(cur.current1) / 100.0;
-      gpio_current_right_a_ = static_cast<double>(cur.current2) / 100.0;
-    }
+    diag_slot_ = (diag_slot_ + 1) % 4;
   }
 
   return hardware_interface::return_type::OK;
@@ -331,7 +348,19 @@ hardware_interface::return_type RoboClawHardware::write(
     return hardware_interface::return_type::OK;
   }
 
-  return execute_velocity_command(hw_cmd_vel_[0], hw_cmd_vel_[1]);
+  constexpr double kEpsilon = 1e-6;
+  bool changed = std::abs(hw_cmd_vel_[0] - prev_cmd_vel_[0]) > kEpsilon ||
+                 std::abs(hw_cmd_vel_[1] - prev_cmd_vel_[1]) > kEpsilon;
+
+  if (!changed && !cmd_vel_dirty_) {
+    return hardware_interface::return_type::OK;
+  }
+
+  auto ret = execute_velocity_command(hw_cmd_vel_[0], hw_cmd_vel_[1]);
+  prev_cmd_vel_[0] = hw_cmd_vel_[0];
+  prev_cmd_vel_[1] = hw_cmd_vel_[1];
+  cmd_vel_dirty_ = false;
+  return ret;
 }
 
 // ===========================================================================

@@ -225,6 +225,10 @@ private:
   std::array<double, 2> hw_state_pos_ = {0.0, 0.0};
   std::array<double, 2> hw_state_vel_ = {0.0, 0.0};
 
+  // ---- Write-on-change: skip TCP write when command hasn't changed --------
+  std::array<double, 2> prev_cmd_vel_ = {0.0, 0.0};
+  bool   cmd_vel_dirty_ = true;  // force first write
+
   // ---- Diagnostics GPIO state interfaces ----------------------------------
   double gpio_main_battery_v_  = 0.0;
   double gpio_temperature_c_   = 0.0;
@@ -232,9 +236,14 @@ private:
   double gpio_current_left_a_  = 0.0;
   double gpio_current_right_a_ = 0.0;
 
+  // ---- Velocity estimation from encoder deltas ----------------------------
+  std::array<double, 2> prev_state_pos_ = {0.0, 0.0};
+  bool   first_read_ = true;
+
   // ---- Diagnostics scheduling ---------------------------------------------
-  int    diag_read_counter_ = 0;
-  int    diag_read_interval_ = 100;  // every N-th read() cycle
+  int    diag_cycle_counter_ = 0;
+  static constexpr int kDiagIntervalCycles = 25;  // 4 slots × 25 cycles = 100 cycles = 1Hz full refresh
+  int    diag_slot_ = 0;                          // rotates 0..3 across slots
 };
 
 }  // namespace roboclaw_hardware
