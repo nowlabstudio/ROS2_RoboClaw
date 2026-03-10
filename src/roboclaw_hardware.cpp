@@ -130,11 +130,14 @@ bool RoboClawHardware::validate_parameters() const
 hardware_interface::CallbackReturn RoboClawHardware::on_init(
   const hardware_interface::HardwareInfo & info)
 {
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
   if (hardware_interface::SystemInterface::on_init(info) !=
       hardware_interface::CallbackReturn::SUCCESS)
   {
     return hardware_interface::CallbackReturn::ERROR;
   }
+#pragma GCC diagnostic pop
 
   auto logger = rclcpp::get_logger("RoboClawHardware");
 
@@ -465,10 +468,12 @@ void RoboClawHardware::initialize_state_interfaces()
     return;
   }
 
-  auto enc = protocol_->GetEncoders(address_);
+  EncodersResult enc = protocol_->GetEncoders(address_);
   if (enc.ok) {
-    hw_state_pos_[0] = unit_converter_->counts_to_radians(enc.enc1);
-    hw_state_pos_[1] = unit_converter_->counts_to_radians(enc.enc2);
+    int32_t e1 = enc.enc1;
+    int32_t e2 = enc.enc2;
+    hw_state_pos_[0] = unit_converter_->counts_to_radians(e1);
+    hw_state_pos_[1] = unit_converter_->counts_to_radians(e2);
   }
 
   hw_state_vel_[0] = 0.0;

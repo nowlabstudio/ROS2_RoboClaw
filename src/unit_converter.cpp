@@ -1,5 +1,6 @@
 #include "roboclaw_hardware/unit_converter.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <sstream>
 
