@@ -1,0 +1,10 @@
+# Read live diagnostics from the RoboClaw.
+---
+float32 main_battery_v    # Main battery voltage [V]
+float32 logic_battery_v   # Logic battery voltage [V]
+float32 current_left_a    # Left motor current [A]
+float32 current_right_a   # Right motor current [A]
+float32 temperature_c     # Board temperature [°C]
+uint32  error_status      # RoboClaw error bitmask (0 = no error)
+bool    success
+string  message

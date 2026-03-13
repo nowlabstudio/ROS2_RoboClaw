@@ -47,6 +47,8 @@ namespace cmd
 {
   constexpr uint8_t SET_TIMEOUT              = 14;
   constexpr uint8_t GET_TIMEOUT              = 15;
+  constexpr uint8_t SET_M1_PID               = 28;
+  constexpr uint8_t SET_M2_PID               = 29;
   constexpr uint8_t RESET_ENCODERS           = 20;
   constexpr uint8_t GET_VERSION              = 21;
   constexpr uint8_t MIXED_DUTY               = 34;
@@ -141,6 +143,12 @@ public:
   // -- Configuration ----------------------------------------------------------
   bool SetTimeout(uint8_t address, uint32_t timeout_ms);
   bool ResetEncoders(uint8_t address);
+
+  /// Set velocity PID gains for M1 (cmd 28) or M2 (cmd 29).
+  /// kp, ki, kd are sent as Q16.16 fixed-point (multiplied by 65536).
+  /// qpps = encoder counts/sec at maximum speed (PID reference).
+  bool SetM1PID(uint8_t address, double kp, double ki, double kd, uint32_t qpps);
+  bool SetM2PID(uint8_t address, double kp, double ki, double kd, uint32_t qpps);
 
 private:
   // CRC16 (CCITT polynomial 0x1021)

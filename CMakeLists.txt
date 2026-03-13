@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(roboclaw_hardware LANGUAGES CXX)
+project(roboclaw_hardware LANGUAGES C CXX)
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "(GNU|Clang)")
   add_compile_options(-Wall -Wextra -Wpedantic)
@@ -13,6 +13,19 @@ find_package(hardware_interface REQUIRED)
 find_package(pluginlib REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rclcpp_lifecycle REQUIRED)
+find_package(rosidl_default_generators REQUIRED)
+
+# ---------------------------------------------------------------------------
+# Service interfaces
+# ---------------------------------------------------------------------------
+rosidl_generate_interfaces(${PROJECT_NAME}_interfaces
+  "srv/StopMotors.srv"
+  "srv/ResetEncoders.srv"
+  "srv/GetMotorStatus.srv"
+  "srv/SetPIDGains.srv"
+  "srv/ClearErrors.srv"
+)
+rosidl_get_typesupport_target(cpp_typesupport_target ${PROJECT_NAME}_interfaces "rosidl_typesupport_cpp")
 
 # ---------------------------------------------------------------------------
 # Library: roboclaw_hardware
@@ -41,10 +54,23 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE ROBOCLAW_HARDWARE_BUILDING_DL
 pluginlib_export_plugin_description_file(hardware_interface roboclaw_hardware_plugin.xml)
 
 # ---------------------------------------------------------------------------
+# Executable: roboclaw_service_node
+# ---------------------------------------------------------------------------
+add_executable(roboclaw_service_node src/roboclaw_service_node.cpp
+  src/roboclaw_tcp.cpp
+  src/roboclaw_protocol.cpp
+)
+target_include_directories(roboclaw_service_node PRIVATE
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+)
+ament_target_dependencies(roboclaw_service_node rclcpp)
+target_link_libraries(roboclaw_service_node "${cpp_typesupport_target}")
+
+# ---------------------------------------------------------------------------
 # Install
 # ---------------------------------------------------------------------------
 install(
-  TARGETS ${PROJECT_NAME}
+  TARGETS ${PROJECT_NAME} roboclaw_service_node
   EXPORT export_${PROJECT_NAME}
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib

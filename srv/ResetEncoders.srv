@@ -1,0 +1,5 @@
+# Zero both encoder counters on the RoboClaw.
+# Call before homing or when absolute position reference is needed.
+---
+bool success
+string message

@@ -546,4 +546,45 @@ bool RoboClawProtocol::ResetEncoders(uint8_t address)
   return false;
 }
 
+bool RoboClawProtocol::SetM1PID(
+  uint8_t address, double kp, double ki, double kd, uint32_t qpps)
+{
+  // RoboClaw expects values as Q16.16 fixed-point (multiply by 65536).
+  const uint32_t kp_fp = static_cast<uint32_t>(kp * 65536.0);
+  const uint32_t ki_fp = static_cast<uint32_t>(ki * 65536.0);
+  const uint32_t kd_fp = static_cast<uint32_t>(kd * 65536.0);
+
+  for (int attempt = 0; attempt < kMaxRetries; ++attempt) {
+    transport_.flush();
+
+    if (!send_command(address, cmd::SET_M1_PID)) { continue; }
+    if (!send_long(kd_fp))   { continue; }  // RoboClaw order: d, p, i, qpps
+    if (!send_long(kp_fp))   { continue; }
+    if (!send_long(ki_fp))   { continue; }
+    if (!send_long(qpps))    { continue; }
+    if (write_checksum_and_ack()) { return true; }
+  }
+  return false;
+}
+
+bool RoboClawProtocol::SetM2PID(
+  uint8_t address, double kp, double ki, double kd, uint32_t qpps)
+{
+  const uint32_t kp_fp = static_cast<uint32_t>(kp * 65536.0);
+  const uint32_t ki_fp = static_cast<uint32_t>(ki * 65536.0);
+  const uint32_t kd_fp = static_cast<uint32_t>(kd * 65536.0);
+
+  for (int attempt = 0; attempt < kMaxRetries; ++attempt) {
+    transport_.flush();
+
+    if (!send_command(address, cmd::SET_M2_PID)) { continue; }
+    if (!send_long(kd_fp))   { continue; }
+    if (!send_long(kp_fp))   { continue; }
+    if (!send_long(ki_fp))   { continue; }
+    if (!send_long(qpps))    { continue; }
+    if (write_checksum_and_ack()) { return true; }
+  }
+  return false;
+}
+
 }  // namespace roboclaw_hardware

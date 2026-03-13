@@ -1,0 +1,6 @@
+# Clear latched error flags on the RoboClaw.
+# Sends a ReadError followed by a soft reset of tracked error state.
+# Note: hardware errors re-assert if the underlying condition persists.
+---
+bool   success
+string message

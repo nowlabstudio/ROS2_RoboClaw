@@ -1,0 +1,5 @@
+# Stop both motors with controlled deceleration.
+# Sends DutyM1M2(0, 0) — hardware ramp applied by RoboClaw.
+---
+bool success
+string message

@@ -1,0 +1,11 @@
+# Set velocity PID gains for one motor.
+# Uses RoboClaw SetM1PIDv / SetM2PIDv (cmd 28/29).
+# Values are Q16.16 fixed-point on the wire; pass as floats here.
+uint8  motor    # 0 = left (M1), 1 = right (M2)
+float64 kp
+float64 ki
+float64 kd
+uint32  qpps    # Encoder counts/sec at maximum speed (used as PID reference)
+---
+bool   success
+string message
