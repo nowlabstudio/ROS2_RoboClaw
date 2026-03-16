@@ -265,11 +265,13 @@ private:
 
   // ---- Rotating diagnostics (one TCP read every N-th cycle, 4 slots) ----
   // Slot 0: volts, 1: temps, 2: error, 3: currents
-  // At 100Hz with interval=1: diag every cycle, full refresh 40ms = 25Hz
+  // At 50Hz with interval=4: diag every 4th cycle, full refresh 320ms = ~3Hz
+  // USR-K6 TCP round-trip ~7ms → 2 RT (encoders+diag) = 14ms + write 7ms = 21ms > 20ms budget
+  // interval=4 → 3/4 ciklus: 1 RT read + 1 RT write = 14ms ✅ (diag nélkül)
   uint8_t  diag_slot_ = 0;
   uint16_t diag_cycle_counter_ = 0;
   static constexpr uint8_t  kDiagSlotCount = 4;
-  static constexpr uint16_t kDiagIntervalCycles = 1;
+  static constexpr uint16_t kDiagIntervalCycles = 4;
 
   // ---- Encoder health monitoring -----------------------------------------
   EncoderHealthState  enc_health_;
