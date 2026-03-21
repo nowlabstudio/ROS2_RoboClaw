@@ -14,6 +14,7 @@ find_package(pluginlib REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rclcpp_lifecycle REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
+find_package(std_msgs REQUIRED)
 
 # ---------------------------------------------------------------------------
 # Service interfaces
@@ -47,6 +48,7 @@ ament_target_dependencies(${PROJECT_NAME}
   pluginlib
   rclcpp
   rclcpp_lifecycle
+  std_msgs
 )
 
 target_compile_definitions(${PROJECT_NAME} PRIVATE ROBOCLAW_HARDWARE_BUILDING_DLL)

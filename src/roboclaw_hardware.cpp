@@ -54,6 +54,11 @@ void RoboClawHardware::extract_physical_parameters(
     get_param(info, "encoder_counts_per_rev", std::to_string(encoder_cpr_)));
   gear_ratio_ = std::stod(
     get_param(info, "gear_ratio", std::to_string(gear_ratio_)));
+
+  auto invert_left = get_param(info, "invert_left_motor", "false");
+  auto invert_right = get_param(info, "invert_right_motor", "false");
+  motor_sign_[0] = (invert_left == "true") ? -1.0 : 1.0;
+  motor_sign_[1] = (invert_right == "true") ? -1.0 : 1.0;
 }
 
 void RoboClawHardware::extract_motion_parameters(
@@ -215,6 +220,14 @@ hardware_interface::CallbackReturn RoboClawHardware::on_configure(
        controller_type_ == ControllerType::MCP      ? "MCP" : "Unknown"),
       (servo_capable_ ? "yes" : "no"));
 
+    // Create connection status publisher — no executor needed (publish() is DDS-direct)
+    status_node_  = std::make_shared<rclcpp::Node>("roboclaw_hw_status");
+    connected_pub_ = status_node_->create_publisher<std_msgs::msg::Bool>(
+      "/hardware/roboclaw/connected",
+      rclcpp::QoS(1).transient_local().reliable());
+    prev_connection_lost_ = false;
+    publish_connection_status(true);
+
   } catch (const std::exception & e) {
     RCLCPP_ERROR(logger, "on_configure failed: %s", e.what());
     return hardware_interface::CallbackReturn::ERROR;
@@ -356,8 +369,8 @@ hardware_interface::return_type RoboClawHardware::read(
   }
   enc_health_.comm_fail_counter = 0;
 
-  hw_state_pos_[0] = unit_converter_->counts_to_radians(enc.enc1);
-  hw_state_pos_[1] = unit_converter_->counts_to_radians(enc.enc2);
+  hw_state_pos_[0] = motor_sign_[0] * unit_converter_->counts_to_radians(enc.enc1);
+  hw_state_pos_[1] = motor_sign_[1] * unit_converter_->counts_to_radians(enc.enc2);
 
   double dt = period.seconds();
   if (!first_read_ && dt > 0.0) {
@@ -378,6 +391,12 @@ hardware_interface::return_type RoboClawHardware::read(
   if (++diag_cycle_counter_ >= kDiagIntervalCycles) {
     diag_cycle_counter_ = 0;
     read_one_diagnostic();
+  }
+
+  // Publish connection status on change (non-blocking, safe from real-time loop)
+  if (connection_lost_ != prev_connection_lost_) {
+    prev_connection_lost_ = connection_lost_;
+    publish_connection_status(!connection_lost_);
   }
 
   return hardware_interface::return_type::OK;
@@ -412,6 +431,9 @@ hardware_interface::return_type RoboClawHardware::write(
 hardware_interface::return_type RoboClawHardware::execute_velocity_command(
   double left_rad_s, double right_rad_s)
 {
+  // Apply motor direction inversion before sending to RoboClaw.
+  left_rad_s  *= motor_sign_[0];
+  right_rad_s *= motor_sign_[1];
   try {
     constexpr double kStopThreshold = 1e-6;
     bool is_stop = std::abs(left_rad_s) < kStopThreshold &&
@@ -688,8 +710,8 @@ void RoboClawHardware::initialize_state_interfaces()
 #pragma GCC diagnostic ignored "-Wdangling-pointer"
   auto enc = protocol_->GetEncoders(address_);
   if (enc.ok) {
-    hw_state_pos_[0] = unit_converter_->counts_to_radians(enc.enc1);
-    hw_state_pos_[1] = unit_converter_->counts_to_radians(enc.enc2);
+    hw_state_pos_[0] = motor_sign_[0] * unit_converter_->counts_to_radians(enc.enc1);
+    hw_state_pos_[1] = motor_sign_[1] * unit_converter_->counts_to_radians(enc.enc2);
   }
 #pragma GCC diagnostic pop
 
@@ -961,6 +983,18 @@ void RoboClawHardware::perform_auto_homing()
 {
   RCLCPP_INFO(rclcpp::get_logger("RoboClawHardware"),
     "perform_auto_homing: stub -- homing sequence not yet implemented");
+}
+
+void RoboClawHardware::publish_connection_status(bool connected)
+{
+  if (!connected_pub_) { return; }
+  std_msgs::msg::Bool msg;
+  msg.data = connected;
+  connected_pub_->publish(msg);
+  RCLCPP_INFO(rclcpp::get_logger("RoboClawHardware"),
+    "RoboClaw TCP %s → /hardware/roboclaw/connected = %s",
+    connected ? "reconnected" : "connection lost",
+    connected ? "true" : "false");
 }
 
 }  // namespace roboclaw_hardware

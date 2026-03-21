@@ -9,7 +9,9 @@
 #include <hardware_interface/system_interface.hpp>
 #include <hardware_interface/types/hardware_interface_return_values.hpp>
 #include <rclcpp/macros.hpp>
+#include <rclcpp/rclcpp.hpp>
 #include <rclcpp_lifecycle/state.hpp>
+#include "std_msgs/msg/bool.hpp"
 
 #include <map>
 #include <memory>
@@ -208,6 +210,7 @@ private:
   double wheel_separation_     = 0.3;
   int    encoder_cpr_          = 1000;
   double gear_ratio_           = 16.0;
+  double motor_sign_[2]        = {1.0, 1.0};  // per-wheel sign flip
 
   std::unique_ptr<UnitConverter> unit_converter_;
 
@@ -240,6 +243,14 @@ private:
   static constexpr uint32_t kReconnectIntervalCycles = 100;  // try every ~1s @100Hz
   uint32_t reconnect_cooldown_   = 0;
   bool attempt_reconnect();
+
+  // ---- Connection status publisher (/hardware/roboclaw/connected) ---------
+  // Publishes Bool: true = connected, false = TCP lost. TRANSIENT_LOCAL → late joiners get last msg.
+  // No executor thread needed — publisher->publish() is DDS-direct and does not require spin().
+  rclcpp::Node::SharedPtr                              status_node_;
+  rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr    connected_pub_;
+  bool                                                 prev_connection_lost_ = false;
+  void publish_connection_status(bool connected);
 
   // ---- ros2_control state & command arrays --------------------------------
   // Indices: 0 = left, 1 = right
