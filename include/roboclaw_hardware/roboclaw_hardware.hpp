@@ -246,10 +246,16 @@ private:
 
   // ---- Connection status publisher (/hardware/roboclaw/connected) ---------
   // Publishes Bool: true = connected, false = TCP lost. TRANSIENT_LOCAL → late joiners get last msg.
-  // No executor thread needed — publisher->publish() is DDS-direct and does not require spin().
+  // Two publish modes:
+  //   1. On-change: immediate notification when TCP drops or recovers.
+  //   2. Periodic heartbeat at ~10 Hz: allows safety_supervisor to detect driver crash/freeze
+  //      via topic silence (no executor thread needed — publish() is DDS-direct).
   rclcpp::Node::SharedPtr                              status_node_;
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr    connected_pub_;
   bool                                                 prev_connection_lost_ = false;
+  uint16_t                                             status_publish_counter_ = 0;
+  // At 50 Hz control loop, publish every 5 cycles = ~10 Hz heartbeat.
+  static constexpr uint16_t kStatusPublishInterval = 5;
   void publish_connection_status(bool connected);
 
   // ---- ros2_control state & command arrays --------------------------------

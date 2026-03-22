@@ -393,9 +393,16 @@ hardware_interface::return_type RoboClawHardware::read(
     read_one_diagnostic();
   }
 
-  // Publish connection status on change (non-blocking, safe from real-time loop)
+  // Publish connection status:
+  //   1. On change: immediate notification when TCP drops or recovers.
+  //   2. Periodic heartbeat at ~10 Hz: enables safety_supervisor to detect driver crash/freeze
+  //      via topic silence (3 missed messages at 10 Hz = 300 ms → FAULT).
   if (connection_lost_ != prev_connection_lost_) {
     prev_connection_lost_ = connection_lost_;
+    status_publish_counter_ = 0;   // reset heartbeat counter after edge publish
+    publish_connection_status(!connection_lost_);
+  } else if (++status_publish_counter_ >= kStatusPublishInterval) {
+    status_publish_counter_ = 0;
     publish_connection_status(!connection_lost_);
   }
 
