@@ -249,9 +249,16 @@ hardware_interface::CallbackReturn RoboClawHardware::on_activate(
   // controller initialization artifacts.
   protocol_->DutyM1M2(address_, 0, 0);
 
-  // Set the RoboClaw's own serial timeout (500 ms).  Note: this timeout
-  // is reset by ANY command including reads (GetEncoders), so it only
-  // protects against complete communication loss, not missing cmd_vel.
+  // Set the RoboClaw's own serial timeout to 500ms.
+  // Unit: 100ms/unit → value 5 sent to the controller.
+  // The timeout is reset by ANY valid packet (including GetEncoders reads),
+  // so it only fires on complete TCP communication loss — not on missing cmd_vel.
+  // At 50Hz: GetEncoders resets the timeout every 20ms → 500ms = 25 missed cycles,
+  // no false triggers during normal operation.
+  // After TCP drops: read() exits early (no GetEncoders), countdown starts,
+  // motors stop within 500ms independent of the ROS2 safety layer.
+  // Note: this overrides the EEPROM value on every activate — keep in sync
+  // with the Motion Studio "Serial Timeout" setting (0.5s).
   protocol_->SetTimeout(address_, 500);
 
   cmd_vel_dirty_ = false;

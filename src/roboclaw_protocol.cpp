@@ -521,9 +521,11 @@ bool RoboClawProtocol::SpeedAccelDeccelPosM1M2(
 
 bool RoboClawProtocol::SetTimeout(uint8_t address, uint32_t timeout_ms)
 {
-  // RoboClaw expects a single byte in 10ms units (0-255 → 0-2550ms).
+  // RoboClaw expects a single byte in 100ms units (0-255 → 0-25500ms).
+  // Empirically verified: sending 50 units causes ~5s stop delay → 100ms/unit.
+  // BasicMicro documentation (some firmware versions) also states 100ms increments.
   uint8_t val = static_cast<uint8_t>(
-    std::min(timeout_ms / 10u, static_cast<uint32_t>(255)));
+    std::min(timeout_ms / 100u, static_cast<uint32_t>(255)));
 
   for (int attempt = 0; attempt < kMaxRetries; ++attempt) {
     transport_.flush();
