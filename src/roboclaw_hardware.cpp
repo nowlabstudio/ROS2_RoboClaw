@@ -407,10 +407,10 @@ hardware_interface::return_type RoboClawHardware::read(
   if (connection_lost_ != prev_connection_lost_) {
     prev_connection_lost_ = connection_lost_;
     status_publish_counter_ = 0;   // reset heartbeat counter after edge publish
-    publish_connection_status(!connection_lost_);
+    publish_connection_status(!connection_lost_, true);
   } else if (++status_publish_counter_ >= kStatusPublishInterval) {
     status_publish_counter_ = 0;
-    publish_connection_status(!connection_lost_);
+    publish_connection_status(!connection_lost_, false);
   }
 
   return hardware_interface::return_type::OK;
@@ -999,16 +999,18 @@ void RoboClawHardware::perform_auto_homing()
     "perform_auto_homing: stub -- homing sequence not yet implemented");
 }
 
-void RoboClawHardware::publish_connection_status(bool connected)
+void RoboClawHardware::publish_connection_status(bool connected, bool log_it)
 {
   if (!connected_pub_) { return; }
   std_msgs::msg::Bool msg;
   msg.data = connected;
   connected_pub_->publish(msg);
-  RCLCPP_INFO(rclcpp::get_logger("RoboClawHardware"),
-    "RoboClaw TCP %s → /hardware/roboclaw/connected = %s",
-    connected ? "reconnected" : "connection lost",
-    connected ? "true" : "false");
+  if (log_it) {
+    RCLCPP_INFO(rclcpp::get_logger("RoboClawHardware"),
+      "RoboClaw TCP %s → /hardware/roboclaw/connected = %s",
+      connected ? "reconnected" : "connection lost",
+      connected ? "true" : "false");
+  }
 }
 
 }  // namespace roboclaw_hardware

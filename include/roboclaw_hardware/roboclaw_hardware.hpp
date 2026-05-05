@@ -256,7 +256,7 @@ private:
   uint16_t                                             status_publish_counter_ = 0;
   // At 50 Hz control loop, publish every 5 cycles = ~10 Hz heartbeat.
   static constexpr uint16_t kStatusPublishInterval = 5;
-  void publish_connection_status(bool connected);
+  void publish_connection_status(bool connected, bool log_it = true);
 
   // ---- ros2_control state & command arrays --------------------------------
   // Indices: 0 = left, 1 = right
